@@ -1,0 +1,104 @@
+// 2013 Thomas Hunsaker @thunsaker (original code for Spoon)
+// 2013 Sébastiaan Versteeg @se_bastiaan
+
+#include <pebble.h>
+#include "roosterlist.h"
+#include "pebble-assist.h"
+#include "common.h"
+        
+#define MAX_ITEMS 9
+#define USER_ID_SAVED 10
+
+static Window *window;
+static TextLayer *text_layer;
+
+void out_sent_handler(DictionaryIterator *sent, void *context) {
+  // outgoing message was delivered
+}
+
+
+void out_failed_handler(DictionaryIterator *failed, AppMessageResult reason, void *context) {
+  // outgoing message failed
+}
+
+void tap_handler(AccelAxisType axis, int32_t direction) {
+        vibes_double_pulse();
+        roosterlist_get(roosterlist_day(), true);
+}
+
+void enableRefresh() {
+        accel_tap_service_subscribe(tap_handler);
+}
+
+void in_received_handler(DictionaryIterator *iter, void *context) {
+        Tuple *text_tuple_user = dict_find(iter, USER_ID);
+        Tuple *text_tuple_error = dict_find(iter, ERROR);
+
+        if(text_tuple_user) {
+                APP_LOG(APP_LOG_LEVEL_DEBUG, "Received userdata!");
+                text_layer_set_text(text_layer, "Connected to service!");
+                persist_write_string(USER_ID_SAVED, text_tuple_user->value->cstring);
+                roosterlist_get(roosterlist_day(), true);
+        } else if(!text_tuple_user && !text_tuple_error) {
+                APP_LOG(APP_LOG_LEVEL_DEBUG, "Received listdata!");
+                if(!roosterlist_is_on_top()) {
+                        window_stack_pop_all(true);
+                        roosterlist_show();
+                }
+
+                enableRefresh();
+                if (roosterlist_is_on_top()) {
+                        roosterlist_in_received_handler(iter);
+                } else {
+                        app_message_outbox_send();
+                }
+        } else {
+                roosterlist_destroy();
+                text_layer_set_text(text_layer, text_tuple_error->value->cstring);
+        }
+}
+
+void in_dropped_handler(AppMessageResult reason, void *context) {
+        APP_LOG(APP_LOG_LEVEL_DEBUG, "App Message Dropped!");
+}
+
+static void init(void) {
+        app_message_register_inbox_received(in_received_handler);
+        app_message_register_inbox_dropped(in_dropped_handler);
+        app_message_register_outbox_sent(out_sent_handler);
+        app_message_register_outbox_failed(out_failed_handler);
+
+        const uint32_t inbound_size = 2048;
+        const uint32_t outbound_size = 64;
+        app_message_open(inbound_size, outbound_size);
+        
+        roosterlist_init();
+}
+
+int main(void) {
+        init();
+        window = window_create();
+        window_stack_push(window, true);
+
+        Layer *window_layer = window_get_root_layer(window);
+
+        GRect bounds = layer_get_frame(window_layer);
+
+        text_layer = text_layer_create(GRect(0,25, bounds.size.w, bounds.size.h));
+        text_layer_set_text_alignment(text_layer, GTextAlignmentCenter);
+        text_layer_set_overflow_mode(text_layer, GTextOverflowModeWordWrap);
+        text_layer_set_font(text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
+        text_layer_set_text(text_layer, "Welcome to BLC Rooster!");
+        layer_add_child(window_layer, text_layer_get_layer(text_layer));
+
+        if(!persist_exists(USER_ID_SAVED)) {
+                roosterlist_get(roosterlist_day(), true);
+        } else {
+                text_layer_set_text(text_layer, "Open the Pebble app on your phone and connect to the Rooster service.");
+        }
+
+        app_event_loop();
+
+        text_layer_destroy(text_layer);
+        window_destroy(window);
+}

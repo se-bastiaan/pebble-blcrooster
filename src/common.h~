@@ -1,0 +1,10 @@
+typedef struct {
+        char id[25];
+        char name[56];
+        char address[128];
+                int index;
+} SpoonVenue;
+
+enum {
+        REFRESH = 0x6
+};

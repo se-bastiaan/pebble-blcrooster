@@ -1,0 +1,24 @@
+{
+  "uuid": "bc5e429d-7475-4c0d-8595-481346c10b48",
+  "shortName": "BLC Rooster",
+  "longName": "Blariacum Rooster",
+  "companyName": "Sebastiaanmaakt",
+  "versionCode": 1,
+  "versionLabel": "1.0.0",
+  "capabilities": [ "configurable" ],
+  "watchapp": {
+    "watchface": false
+  },
+  "appKeys": {
+    "dummy": 0
+  },
+  "resources": {
+    "media": [
+      {
+        "type": "png",
+        "name": "IMAGE_MENU_ICON_BIG_WATCH",
+        "file": "images/menu_icon_big_watch.png"
+      }
+    ]
+  }
+}

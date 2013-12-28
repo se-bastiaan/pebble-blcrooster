@@ -1,0 +1,186 @@
+// 2013 Thomas Hunsaker @thunsaker
+// Heavily modified version of Neal's Hacker News list implementation - https://github.com/Neal/pebble-hackernews
+
+#include <pebble.h>
+#include "roosterlist.h"
+#include "pebble-assist.h"
+#include "common.h"
+
+#define MAX_ITEMS 9
+
+static RoosterItem items[MAX_ITEMS];
+
+static int num_items;
+static int day;
+static char error[128];
+static const char wday_name[][10] = {
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"
+  };
+
+static void clean_list();
+static uint16_t menu_get_num_sections_callback(struct MenuLayer *menu_layer, void *callback_context);
+static uint16_t menu_get_num_rows_callback(struct MenuLayer *menu_layer, uint16_t section_index, void *callback_context);
+static int16_t menu_get_header_height_callback(struct MenuLayer *menu_layer, uint16_t section_index, void *callback_context);
+static int16_t menu_get_cell_height_callback(struct MenuLayer *menu_layer, MenuIndex *cell_index, void *callback_context);
+static void menu_draw_header_callback(GContext *ctx, const Layer *cell_layer, uint16_t section_index, void *callback_context);
+static void menu_draw_row_callback(GContext *ctx, const Layer *cell_layer, MenuIndex *cell_index, void *callback_context);
+static void menu_select_callback(struct MenuLayer *menu_layer, MenuIndex *cell_index, void *callback_context);
+static void menu_select_long_callback(struct MenuLayer *menu_layer, MenuIndex *cell_index, void *callback_context);
+
+static Window *window;
+static MenuLayer *menu_layer;
+
+
+void roosterlist_init(void) {
+        window = window_create();
+
+        menu_layer = menu_layer_create_fullscreen(window);
+        menu_layer_set_callbacks(menu_layer, NULL, (MenuLayerCallbacks) {
+                .get_num_sections = menu_get_num_sections_callback,
+                .get_num_rows = menu_get_num_rows_callback,
+                .get_header_height = menu_get_header_height_callback,
+                .get_cell_height = menu_get_cell_height_callback,
+                .draw_header = menu_draw_header_callback,
+                .draw_row = menu_draw_row_callback,
+                .select_click = menu_select_callback,
+                .select_long_click = menu_select_long_callback,
+        });
+        menu_layer_set_click_config_onto_window(menu_layer, window);
+        menu_layer_add_to_window(menu_layer, window);
+
+        num_items = 0;
+
+        time_t rawtime;
+        struct tm * timeptr;
+        time(&rawtime);
+        timeptr = localtime(&rawtime);
+        day = (int) timeptr->tm_wday;     
+
+        if(day < 5 && timeptr->tm_hour > 17) day++;
+        if(day < 0 || day > 4) day = 0;
+}
+
+void roosterlist_show() {
+        clean_list();
+        window_stack_push(window, true);
+}
+
+void roosterlist_destroy(void) {
+        layer_remove_from_parent(menu_layer_get_layer(menu_layer));
+        menu_layer_destroy_safe(menu_layer);
+        window_destroy_safe(window);
+}
+
+void roosterlist_get(int day, bool refresh) {        
+        DictionaryIterator *iter;
+        app_message_outbox_begin(&iter);
+
+        if (iter == NULL) {
+                return;
+        }
+
+        if(refresh) {
+                Tuplet tuple = TupletInteger(REFRESH, day + 1);
+                dict_write_tuplet(iter, &tuple);
+        } else {
+                Tuplet tuple = TupletInteger(LOAD, day + 1);
+                dict_write_tuplet(iter, &tuple);
+        }
+       
+        dict_write_end(iter);
+        app_message_outbox_send();
+}
+
+static void clean_list() {
+        memset(items, 0x0, sizeof(items));
+        num_items = 0;
+        error[0] = '\0';
+        menu_layer_set_selected_index(menu_layer, (MenuIndex) { .row = 0, .section = 0 }, MenuRowAlignBottom, false);
+        menu_layer_reload_data_and_mark_dirty(menu_layer);
+}
+
+bool roosterlist_is_on_top() {
+        return window == window_stack_get_top_window();
+}
+
+int roosterlist_day() {
+        return day;
+}
+
+void roosterlist_in_received_handler(DictionaryIterator *iter) {
+        Tuple *value1_tuple = dict_find(iter, VALUE1);
+        Tuple *value2_tuple = dict_find(iter, VALUE2);
+        Tuple *value3_tuple = dict_find(iter, VALUE3);
+        Tuple *refresh_tuple = dict_find(iter, REFRESH);
+        Tuple *error_tuple = dict_find(iter, ERROR);
+        
+        if(refresh_tuple) {
+                if(refresh_tuple->value->int16 == 1) {
+                        window_stack_pop_all(true);
+                        roosterlist_destroy();
+                        roosterlist_show();
+                }
+        }
+
+        if (value1_tuple) {
+                RoosterItem item;
+                if(num_items < 10) {
+                        item.index = num_items;
+                        strncpy(item.value1, value1_tuple->value->cstring, sizeof(item.value1));
+                        strncpy(item.value2, value2_tuple->value->cstring, sizeof(item.value2));
+                        strncpy(item.value3, value3_tuple->value->cstring, sizeof(item.value3));
+                        items[item.index] = item;
+                        num_items++;
+                        menu_layer_reload_data_and_mark_dirty(menu_layer);
+                }
+        } else {
+                strncpy(error, error_tuple->value->cstring, sizeof(error));
+                menu_layer_reload_data_and_mark_dirty(menu_layer);
+        }
+}
+
+static uint16_t menu_get_num_sections_callback(struct MenuLayer *menu_layer, void *callback_context) {
+        return 1;
+}
+
+static uint16_t menu_get_num_rows_callback(struct MenuLayer *menu_layer, uint16_t section_index, void *callback_context) {
+        return (num_items) ? num_items : 1;
+}
+
+static int16_t menu_get_header_height_callback(struct MenuLayer *menu_layer, uint16_t section_index, void *callback_context) {
+        return MENU_CELL_BASIC_HEADER_HEIGHT;
+}
+
+static int16_t menu_get_cell_height_callback(struct MenuLayer *menu_layer, MenuIndex *cell_index, void *callback_context) {
+        return MENU_CELL_BASIC_CELL_HEIGHT;
+}
+
+static void menu_draw_header_callback(GContext *ctx, const Layer *cell_layer, uint16_t section_index, void *callback_context) {
+        menu_cell_basic_header_draw(ctx, cell_layer, wday_name[day]);        
+}
+
+static void menu_draw_row_callback(GContext *ctx, const Layer *cell_layer, MenuIndex *cell_index, void *callback_context) {
+        if (num_items == 0) {
+                menu_cell_basic_draw(ctx, cell_layer, "Loading...", NULL, NULL);
+        } else {
+                char retVal[strlen(items[cell_index->row].value2)+strlen(items[cell_index->row].value3)+4];
+                strcpy(retVal, items[cell_index->row].value2);
+                strcat(retVal, " - ");
+                strcat(retVal, items[cell_index->row].value3);
+                menu_cell_basic_draw(ctx, cell_layer, items[cell_index->row].value1, retVal, NULL);
+        }
+}
+
+static void menu_select_callback(struct MenuLayer *menu_layer, MenuIndex *cell_index, void *callback_context) {
+        day++;
+        if(day > 4) day = 0;
+        clean_list();
+        roosterlist_get(day, false);
+}
+
+static void menu_select_long_callback(struct MenuLayer *menu_layer, MenuIndex *cell_index, void *callback_context) {
+        //vibes_double_pulse();
+        //strncpy(venueid, items[cell_index->row].id, sizeof(venueid));
+        //strncpy(venuename, items[cell_index->row].name, sizeof(venuename));
+        //send_checkin_request_confirmation(venueid, venuename, 0);
+}
