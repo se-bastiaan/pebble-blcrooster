@@ -1,10 +1,11 @@
+<<<<<<< HEAD
+
 # Ignore build generated files
 build
 =======
 # Object files
 *.o
 *.ko
-wscript
 
 # Libraries
 *.lib
@@ -20,3 +21,4 @@ wscript
 *.exe
 *.out
 *.app
+>>>>>>> afd7746cde289176824a343f3dfca233e0678966
